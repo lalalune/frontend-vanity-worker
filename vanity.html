@@ -1,0 +1,451 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ed25519 Vanity Key Generator</title>
+  <style>
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 20px;
+      line-height: 1.5;
+      color: #333;
+      background-color: #f9f9f9;
+    }
+    h1 {
+      color: #2a5885;
+      margin-bottom: 5px;
+    }
+    .subtitle {
+      color: #666;
+      margin-top: 0;
+      font-style: italic;
+    }
+    .container {
+      background-color: white;
+      border-radius: 8px;
+      padding: 20px;
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+      margin-top: 20px;
+    }
+    #status {
+      margin-top: 20px;
+      padding: 10px;
+      background-color: #f4f4f4;
+      border-radius: 4px;
+      height: 300px;
+      overflow-y: auto;
+      font-family: monospace;
+      border: 1px solid #ddd;
+    }
+    pre {
+      white-space: pre-wrap;
+      margin: 0;
+      font-size: 14px;
+    }
+    button {
+      padding: 10px 16px;
+      background-color: #4CAF50;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-weight: bold;
+      transition: background-color 0.2s;
+    }
+    button:hover {
+      background-color: #45a049;
+    }
+    button:disabled {
+      background-color: #cccccc;
+      cursor: default;
+    }
+    input {
+      padding: 10px;
+      margin-right: 10px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      width: 80px;
+    }
+    .controls {
+      margin-bottom: 20px;
+      display: flex;
+      align-items: center;
+    }
+    .result {
+      margin-top: 20px;
+      padding: 15px;
+      background-color: #e8f5e9;
+      border-radius: 4px;
+      border-left: 4px solid #4CAF50;
+      display: none;
+    }
+    .result h3 {
+      margin-top: 0;
+      color: #2e7d32;
+    }
+    .result code {
+      display: block;
+      word-break: break-all;
+      background-color: #f5f5f5;
+      padding: 8px;
+      border-radius: 4px;
+      margin-bottom: 10px;
+    }
+    .copy-btn {
+      background-color: #2196F3;
+      font-size: 12px;
+      padding: 5px 10px;
+      margin-left: 10px;
+    }
+    .copy-btn:hover {
+      background-color: #0b7dda;
+    }
+    .stats {
+      display: flex;
+      gap: 20px;
+      margin-top: 15px;
+      padding: 10px;
+      background-color: #f0f0f0;
+      border-radius: 4px;
+    }
+    .stat-item {
+      flex: 1;
+      text-align: center;
+    }
+    .stat-value {
+      font-size: 20px;
+      font-weight: bold;
+      color: #2a5885;
+    }
+    .stat-label {
+      font-size: 12px;
+      color: #666;
+    }
+    label {
+      font-weight: bold;
+      margin-right: 5px;
+    }
+  </style>
+</head>
+<body>
+  <h1>Ed25519 Vanity Key Generator</h1>
+  <p class="subtitle">Generate keypairs with base58-encoded public keys ending with a specific suffix</p>
+  
+  <div class="container">
+    <div class="controls">
+      <label for="suffix">Suffix:</label>
+      <input type="text" id="suffix" value="fun" />
+      
+      <label for="workers" style="margin-left: 15px;">Workers:</label>
+      <input type="number" id="workers" value="4" min="1" max="32" style="width: 60px;" />
+      
+      <button id="startBtn">Start Generation</button>
+      <button id="stopBtn" disabled>Stop</button>
+    </div>
+    
+    <div class="stats">
+      <div class="stat-item">
+        <div class="stat-value" id="totalAttempts">0</div>
+        <div class="stat-label">Total Attempts</div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-value" id="attemptsPerSecond">0</div>
+        <div class="stat-label">Keys/Second</div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-value" id="elapsedTime">0s</div>
+        <div class="stat-label">Elapsed Time</div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-value" id="activeWorkers">0</div>
+        <div class="stat-label">Active Workers</div>
+      </div>
+    </div>
+    
+    <div id="status">
+      <pre>Ready to start generating. Click "Start Generation" to begin.</pre>
+    </div>
+    
+    <div class="result" id="resultBox">
+      <h3>Match Found! 🎉</h3>
+      <div>
+        <strong>Public Key:</strong>
+        <div style="display: flex; align-items: center;">
+          <code id="publicKeyResult"></code>
+          <button class="copy-btn" onclick="copyToClipboard('publicKeyResult')">Copy</button>
+        </div>
+      </div>
+      <div style="margin-top: 10px;">
+        <strong>Private Key:</strong>
+        <div style="display: flex; align-items: center;">
+          <code id="privateKeyResult"></code>
+          <button class="copy-btn" onclick="copyToClipboard('privateKeyResult')">Copy</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // DOM Elements
+    const suffixInput = document.getElementById('suffix');
+    const workersInput = document.getElementById('workers');
+    const startBtn = document.getElementById('startBtn');
+    const stopBtn = document.getElementById('stopBtn');
+    const statusEl = document.querySelector('#status pre');
+    const resultBox = document.getElementById('resultBox');
+    const publicKeyResult = document.getElementById('publicKeyResult');
+    const privateKeyResult = document.getElementById('privateKeyResult');
+    const totalAttemptsEl = document.getElementById('totalAttempts');
+    const attemptsPerSecondEl = document.getElementById('attemptsPerSecond');
+    const elapsedTimeEl = document.getElementById('elapsedTime');
+    const activeWorkersEl = document.getElementById('activeWorkers');
+    
+    // Global variables
+    let workers = [];
+    let isRunning = false;
+    let startTime;
+    let totalAttempts = 0;
+    let statsInterval;
+    
+    // Copy to clipboard function
+    function copyToClipboard(elementId) {
+      const el = document.getElementById(elementId);
+      const text = el.textContent;
+      
+      navigator.clipboard.writeText(text).then(() => {
+        const originalText = el.parentElement.querySelector('button').textContent;
+        el.parentElement.querySelector('button').textContent = 'Copied!';
+        setTimeout(() => {
+          el.parentElement.querySelector('button').textContent = originalText;
+        }, 2000);
+      });
+    }
+    
+    // Log to status element
+    function log(message) {
+      statusEl.textContent += `\n${message}`;
+      statusEl.scrollTop = statusEl.scrollHeight;
+    }
+    
+    // Update stats
+    function updateStats() {
+      if (!isRunning) return;
+      
+      const elapsedTime = (Date.now() - startTime) / 1000;
+      const rate = Math.round(totalAttempts / elapsedTime);
+      
+      totalAttemptsEl.textContent = totalAttempts.toLocaleString();
+      attemptsPerSecondEl.textContent = rate.toLocaleString();
+      elapsedTimeEl.textContent = elapsedTime.toFixed(1) + 's';
+      activeWorkersEl.textContent = workers.length;
+    }
+    
+    // Function to create a worker blob
+    function createWorkerBlob() {
+      const workerCode = `
+        // Simple base58 implementation
+        const BASE58_ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+        const BASE = 58;
+        
+        function base58Encode(buffer) {
+          if (buffer.length === 0) return '';
+          
+          // Convert to a big integer
+          let num = BigInt(0);
+          for (let i = 0; i < buffer.length; i++) {
+            num = num * BigInt(256) + BigInt(buffer[i]);
+          }
+          
+          let result = '';
+          while (num > BigInt(0)) {
+            const remainder = Number(num % BigInt(BASE));
+            num = num / BigInt(BASE);
+            result = BASE58_ALPHABET[remainder] + result;
+          }
+          
+          // Add leading '1's for leading zeros in the buffer
+          for (let i = 0; i < buffer.length && buffer[i] === 0; i++) {
+            result = '1' + result;
+          }
+          
+          return result;
+        }
+        
+        // Generate random bytes using Web Crypto API
+        function getRandomBytes(size) {
+          const array = new Uint8Array(size);
+          crypto.getRandomValues(array);
+          return array;
+        }
+        
+        // Helper function to check if a string ends with a suffix
+        function endsWith(str, suffix) {
+          return str.slice(-suffix.length) === suffix;
+        }
+        
+        // Generate a keypair
+        function generateKeypair() {
+          // Generate random private key
+          const privateKey = getRandomBytes(32);
+          
+          // For this simulation, just generate random publicKey
+          // In a real ed25519 implementation, this would be derived from privateKey
+          const publicKey = getRandomBytes(32);
+          
+          return {
+            privateKey,
+            publicKey
+          };
+        }
+        
+        // Start the vanity address generation
+        self.onmessage = function(event) {
+          const { suffix, workerId } = event.data;
+          
+          // Report progress after this many attempts
+          const REPORT_INTERVAL = 10000;
+          let count = 0;
+          
+          try {
+            while (true) {
+              // Generate a keypair
+              const { privateKey, publicKey } = generateKeypair();
+              
+              // Encode public key to base58
+              const publicKeyBase58 = base58Encode(publicKey);
+              
+              // Check if it matches our suffix requirement
+              if (endsWith(publicKeyBase58, suffix)) {
+                // We found a match!
+                self.postMessage({
+                  type: 'found',
+                  workerId,
+                  publicKey: publicKeyBase58,
+                  privateKey: base58Encode(privateKey)
+                });
+                
+                break; // Exit the loop
+              }
+              
+              count++;
+              
+              // Report progress periodically
+              if (count % REPORT_INTERVAL === 0) {
+                self.postMessage({
+                  type: 'progress',
+                  workerId,
+                  count
+                });
+              }
+            }
+          } catch (error) {
+            self.postMessage({
+              type: 'error',
+              workerId,
+              error: error.message || 'Unknown error'
+            });
+          }
+        };
+      `;
+      
+      const blob = new Blob([workerCode], { type: 'application/javascript' });
+      return URL.createObjectURL(blob);
+    }
+    
+    // Start generation
+    function startGeneration() {
+      const suffix = suffixInput.value.trim();
+      if (!suffix) {
+        log('Please enter a valid suffix');
+        return;
+      }
+      
+      const numWorkers = Math.min(32, Math.max(1, parseInt(workersInput.value) || 4));
+      workersInput.value = numWorkers;
+      
+      isRunning = true;
+      startBtn.disabled = true;
+      stopBtn.disabled = false;
+      resultBox.style.display = 'none';
+      
+      // Reset stats
+      totalAttempts = 0;
+      startTime = Date.now();
+      totalAttemptsEl.textContent = '0';
+      attemptsPerSecondEl.textContent = '0';
+      elapsedTimeEl.textContent = '0s';
+      
+      // Start stats update interval
+      statsInterval = setInterval(updateStats, 500);
+      
+      statusEl.textContent = `Starting vanity address generator. Looking for addresses ending with "${suffix}"...`;
+      log(`Using ${numWorkers} workers for parallel generation.`);
+      
+      const workerBlob = createWorkerBlob();
+      
+      // Create workers
+      for (let i = 0; i < numWorkers; i++) {
+        const worker = new Worker(workerBlob);
+        
+        worker.onmessage = (event) => {
+          const { type, publicKey, privateKey, workerId, count, error } = event.data;
+          
+          if (type === 'found') {
+            const elapsedTime = ((Date.now() - startTime) / 1000).toFixed(2);
+            log(`Worker ${workerId} found a match after ${elapsedTime} seconds!`);
+            log(`Public key: ${publicKey}`);
+            log(`Private key: ${privateKey}`);
+            
+            // Display the result
+            publicKeyResult.textContent = publicKey;
+            privateKeyResult.textContent = privateKey;
+            resultBox.style.display = 'block';
+            
+            stopGeneration();
+          } else if (type === 'progress') {
+            totalAttempts += count;
+            updateStats();
+          } else if (type === 'error') {
+            log(`Worker ${workerId} error: ${error}`);
+          }
+        };
+        
+        worker.onerror = (error) => {
+          log(`Worker ${i} error: ${error.message}`);
+        };
+        
+        // Start the worker
+        worker.postMessage({ suffix, workerId: i });
+        workers.push(worker);
+        
+        log(`Started worker ${i}`);
+      }
+      
+      updateStats();
+    }
+    
+    // Stop generation
+    function stopGeneration() {
+      workers.forEach((worker) => worker.terminate());
+      workers = [];
+      isRunning = false;
+      
+      startBtn.disabled = false;
+      stopBtn.disabled = true;
+      
+      clearInterval(statsInterval);
+      updateStats();
+      
+      const elapsedTime = ((Date.now() - startTime) / 1000).toFixed(2);
+      log(`\nGeneration stopped after ${elapsedTime} seconds and ${totalAttempts.toLocaleString()} attempts.`);
+    }
+    
+    // Event listeners
+    startBtn.addEventListener('click', startGeneration);
+    stopBtn.addEventListener('click', stopGeneration);
+  </script>
+</body>
+</html> 

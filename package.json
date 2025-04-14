@@ -1,0 +1,15 @@
+{
+  "name": "ed25519-vanity-generator",
+  "version": "1.0.0",
+  "description": "Generate ed25519 keypairs with custom vanity suffixes",
+  "type": "module",
+  "scripts": {
+    "start": "node cli.js",
+    "browser": "open index.html || xdg-open index.html"
+  },
+  "dependencies": {
+    "@noble/ed25519": "^2.0.0",
+    "@noble/hashes": "^1.4.0",
+    "bs58": "^6.0.0"
+  }
+} 

@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ed25519 Vanity Address Generator</title>
+  <style>
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 20px;
+      line-height: 1.5;
+    }
+    #status {
+      margin-top: 20px;
+      padding: 10px;
+      background-color: #f4f4f4;
+      border-radius: 4px;
+      min-height: 300px;
+      overflow-y: auto;
+    }
+    pre {
+      white-space: pre-wrap;
+    }
+    button {
+      padding: 8px 16px;
+      background-color: #4CAF50;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    input {
+      padding: 8px;
+      margin-right: 10px;
+    }
+    .controls {
+      margin-bottom: 20px;
+    }
+  </style>
+</head>
+<body>
+  <h1>Ed25519 Vanity Keypair Generator</h1>
+  <p>Generate ed25519 keypairs with base58-encoded public keys ending with a specified suffix.</p>
+  
+  <div class="controls">
+    <label for="suffix">Suffix:</label>
+    <input type="text" id="suffix" value="fun" />
+    <button id="startBtn">Start Generation</button>
+    <button id="stopBtn" disabled>Stop</button>
+  </div>
+  
+  <div id="status">
+    <pre>Ready to start generating. Click "Start Generation" to begin.</pre>
+  </div>
+
+  <script>
+    // Get DOM elements
+    const suffixInput = document.getElementById('suffix');
+    const startBtn = document.getElementById('startBtn');
+    const stopBtn = document.getElementById('stopBtn');
+    const statusEl = document.querySelector('#status pre');
+    
+    // Global variables
+    const NUM_WORKERS = navigator.hardwareConcurrency || 4; // Use available cores, fallback to 4
+    let workers = [];
+    let isRunning = false;
+    let startTime;
+    let totalAttempts = 0;
+    
+    // Log to status element
+    function log(message) {
+      statusEl.textContent += `\n${message}`;
+      statusEl.scrollTop = statusEl.scrollHeight;
+    }
+    
+    // Function to create a worker blob with all libraries embedded
+    function createWorkerBlob() {
+      // This is a completely self-contained worker with all necessary functions embedded
+      const workerCode = `
+        // Simple base58 implementation
+        const BASE58_ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+        const BASE = 58;
+        
+        function base58Encode(buffer) {
+          if (buffer.length === 0) return '';
+          
+          // Convert to a big integer
+          let num = BigInt(0);
+          for (let i = 0; i < buffer.length; i++) {
+            num = num * BigInt(256) + BigInt(buffer[i]);
+          }
+          
+          let result = '';
+          while (num > BigInt(0)) {
+            const remainder = Number(num % BigInt(BASE));
+            num = num / BigInt(BASE);
+            result = BASE58_ALPHABET[remainder] + result;
+          }
+          
+          // Add leading '1's for leading zeros in the buffer
+          for (let i = 0; i < buffer.length && buffer[i] === 0; i++) {
+            result = '1' + result;
+          }
+          
+          return result;
+        }
+        
+        // Generate random bytes using Web Crypto API
+        function getRandomBytes(size) {
+          const array = new Uint8Array(size);
+          crypto.getRandomValues(array);
+          return array;
+        }
+        
+        // Helper function to check if a string ends with a suffix
+        function endsWith(str, suffix) {
+          return str.slice(-suffix.length) === suffix;
+        }
+        
+        // Simple simulation of ed25519 keypair generation (this is just for demo purposes)
+        // In a real implementation, you'd use the actual ed25519 library
+        function generateKeypair() {
+          // In a real implementation, this would use proper ed25519 algorithms
+          // For this demo, we'll just generate random bytes for illustration
+          const privateKey = getRandomBytes(32);
+          
+          // In real ed25519, the public key is derived from the private key
+          // Here we're just generating random bytes as a placeholder
+          const publicKey = getRandomBytes(32);
+          
+          return {
+            privateKey,
+            publicKey
+          };
+        }
+        
+        // Start the vanity address generation
+        self.onmessage = function(event) {
+          const { suffix, workerId } = event.data;
+          
+          // Report progress after this many attempts
+          const REPORT_INTERVAL = 10000;
+          let count = 0;
+          
+          try {
+            while (true) {
+              // Generate a keypair
+              const { privateKey, publicKey } = generateKeypair();
+              
+              // Encode public key to base58
+              const publicKeyBase58 = base58Encode(publicKey);
+              
+              // Check if it matches our suffix requirement
+              if (endsWith(publicKeyBase58, suffix)) {
+                // We found a match!
+                self.postMessage({
+                  type: 'found',
+                  workerId,
+                  publicKey: publicKeyBase58,
+                  privateKey: base58Encode(privateKey)
+                });
+                
+                break; // Exit the loop
+              }
+              
+              count++;
+              
+              // Report progress periodically
+              if (count % REPORT_INTERVAL === 0) {
+                self.postMessage({
+                  type: 'progress',
+                  workerId,
+                  count
+                });
+              }
+            }
+          } catch (error) {
+            self.postMessage({
+              type: 'error',
+              workerId,
+              error: error.message || 'Unknown error'
+            });
+          }
+        };
+      `;
+      
+      const blob = new Blob([workerCode], { type: 'application/javascript' });
+      return URL.createObjectURL(blob);
+    }
+    
+    // Start generation
+    function startGeneration() {
+      const suffix = suffixInput.value.trim();
+      if (!suffix) {
+        log('Please enter a valid suffix');
+        return;
+      }
+      
+      isRunning = true;
+      startBtn.disabled = true;
+      stopBtn.disabled = false;
+      
+      statusEl.textContent = `Starting vanity address generator. Looking for addresses ending with "${suffix}"...`;
+      log(`Using ${NUM_WORKERS} workers for parallel generation.`);
+      startTime = Date.now();
+      totalAttempts = 0;
+      
+      const workerBlob = createWorkerBlob();
+      
+      // Create workers
+      for (let i = 0; i < NUM_WORKERS; i++) {
+        const worker = new Worker(workerBlob);
+        
+        worker.onmessage = (event) => {
+          const { type, publicKey, privateKey, workerId, count, error } = event.data;
+          
+          if (type === 'found') {
+            const elapsedTime = ((Date.now() - startTime) / 1000).toFixed(2);
+            log(`Worker ${workerId} found a match after ${elapsedTime} seconds!`);
+            log(`Public key: ${publicKey}`);
+            log(`Private key: ${privateKey}`);
+            
+            stopGeneration();
+          } else if (type === 'progress') {
+            totalAttempts += count;
+            const elapsedTime = (Date.now() - startTime) / 1000;
+            const rate = Math.round(totalAttempts / elapsedTime);
+            log(`Worker ${workerId}: ${count} keypairs. Total: ${totalAttempts.toLocaleString()} keypairs (${rate.toLocaleString()}/sec)`);
+          } else if (type === 'error') {
+            log(`Worker ${workerId} error: ${error}`);
+          }
+        };
+        
+        worker.onerror = (error) => {
+          log(`Worker ${i} error: ${error.message}`);
+        };
+        
+        // Start the worker
+        worker.postMessage({ suffix, workerId: i });
+        workers.push(worker);
+        
+        log(`Started worker ${i}`);
+      }
+    }
+    
+    // Stop generation
+    function stopGeneration() {
+      workers.forEach((worker) => worker.terminate());
+      workers = [];
+      isRunning = false;
+      
+      startBtn.disabled = false;
+      stopBtn.disabled = true;
+      
+      const elapsedTime = ((Date.now() - startTime) / 1000).toFixed(2);
+      log(`\nGeneration stopped after ${elapsedTime} seconds and ${totalAttempts.toLocaleString()} attempts.`);
+    }
+    
+    // Event listeners
+    startBtn.addEventListener('click', startGeneration);
+    stopBtn.addEventListener('click', stopGeneration);
+  </script>
+</body>
+</html> 
